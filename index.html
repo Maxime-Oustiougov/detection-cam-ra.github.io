@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Détection d'objets en temps réel</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tensorflow/4.11.0/tf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tensorflow-models/2.1.0/coco-ssd.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .controls {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .video-container {
+            position: relative;
+            margin-bottom: 20px;
+        }
+        #video {
+            width: 100%;
+            height: auto;
+        }
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        .log-container {
+            height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            padding: 10px;
+            background: #f5f5f5;
+        }
+        .log-entry {
+            margin: 5px 0;
+            font-family: monospace;
+        }
+        #objectCounter {
+            margin-left: auto;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>Détection d'objets en temps réel</h1>
+    
+    <div class="controls">
+        <button id="toggleCamera">Activer la caméra</button>
+        <select id="objectFilter">
+            <option value="">Tous les objets</option>
+            <option value="person">Personne</option>
+            <option value="animal">Animal</option>
+            <option value="vehicle">Véhicule</option>
+        </select>
+        <div id="objectCounter">Objets détectés: 0</div>
+    </div>
+
+    <div class="video-container">
+        <video id="video" autoplay muted></video>
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <div class="log-container" id="logContainer"></div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const toggleButton = document.getElementById('toggleCamera');
+        const objectFilter = document.getElementById('objectFilter');
+        const objectCounter = document.getElementById('objectCounter');
+        const logContainer = document.getElementById('logContainer');
+
+        let model = null;
+        let isStreaming = false;
+        let animationId = null;
+
+        async function loadModel() {
+            try {
+                model = await cocoSsd.load();
+                console.log('Modèle chargé avec succès');
+            } catch (error) {
+                console.error('Erreur lors du chargement du modèle:', error);
+                alert('Erreur lors du chargement du modèle de détection');
+            }
+        }
+
+        async function startVideo() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment' }
+                });
+                video.srcObject = stream;
+                isStreaming = true;
+                toggleButton.textContent = 'Désactiver la caméra';
+                video.addEventListener('loadedmetadata', () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    detectObjects();
+                });
+            } catch (error) {
+                console.error('Erreur d\'accès à la caméra:', error);
+                alert('Impossible d\'accéder à la caméra. Veuillez vérifier les permissions.');
+            }
+        }
+
+        function stopVideo() {
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+            }
+            video.srcObject = null;
+            isStreaming = false;
+            toggleButton.textContent = 'Activer la caméra';
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+            }
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            logContainer.innerHTML = '';
+            objectCounter.textContent = 'Objets détectés: 0';
+        }
+
+        async function detectObjects() {
+            if (!isStreaming || !model) return;
+
+            try {
+                const predictions = await model.detect(video);
+                const filteredPredictions = predictions.filter(pred => {
+                    const filter = objectFilter.value;
+                    if (!filter) return true;
+                    return pred.class.includes(filter);
+                });
+
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                logContainer.innerHTML = '';
+                objectCounter.textContent = `Objets détectés: ${filteredPredictions.length}`;
+
+                filteredPredictions.forEach(prediction => {
+                    const [x, y, width, height] = prediction.bbox;
+                    
+                    ctx.strokeStyle = '#00ff00';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(x, y, width, height);
+
+                    ctx.fillStyle = '#00ff00';
+                    ctx.fillRect(x, y - 20, 
+                        Math.min(width, 200), 20);
+                    
+                    ctx.fillStyle = '#000000';
+                    ctx.font = '16px Arial';
+                    ctx.fillText(
+                        `${prediction.class} - ${Math.round(prediction.score * 100)}%`,
+                        x, y - 5
+                    );
+
+                    const logEntry = document.createElement('div');
+                    logEntry.className = 'log-entry';
+                    logEntry.textContent = `${prediction.class} - ${Math.round(prediction.score * 100)}% - (${Math.round(x)}, ${Math.round(y)})`;
+                    logContainer.appendChild(logEntry);
+                });
+            } catch (error) {
+                console.error('Erreur lors de la détection:', error);
+            }
+
+            animationId = requestAnimationFrame(detectObjects);
+        }
+
+        toggleButton.addEventListener('click', () => {
+            if (isStreaming) {
+                stopVideo();
+            } else {
+                startVideo();
+            }
+        });
+
+        objectFilter.addEventListener('change', () => {
+            if (isStreaming) {
+                logContainer.innerHTML = '';
+            }
+        });
+
+        loadModel();
+    </script>
+</body>
+</html>
